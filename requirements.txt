@@ -1,0 +1,9 @@
+os
+wave
+threading
+numpy 
+sounddevice
+concurrent.futures
+flask
+pandasspeech_recognition
+pyannote.audio
