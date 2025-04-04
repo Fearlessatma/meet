@@ -3,7 +3,6 @@ sounddevice
 numpy
 pandas
 SpeechRecognition
-PyAudio
 pyannote.audio
 torch
 torchaudio
