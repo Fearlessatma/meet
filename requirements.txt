@@ -1,4 +1,3 @@
-os
 wave
 threading
 numpy 
