@@ -2,7 +2,7 @@ import os
 import wave
 import threading
 import numpy as np
-import sounddevice as sd
+import pyaudio
 import concurrent.futures
 import pandas as pd
 import speech_recognition as sr
@@ -16,9 +16,11 @@ app = Flask(__name__)
 SAMPLE_RATE = 44100
 CHANNELS = 1
 CHUNK_DURATION = 3
+FORMAT = pyaudio.paInt16
+CHUNK_SIZE = int(SAMPLE_RATE * CHUNK_DURATION)
 recording = False
 chunk_index = 1
-recorded_audio = np.array([], dtype=np.int16)
+recorded_audio = []
 result_df = pd.DataFrame(columns=["fileId", "speaker", "utterance"])
 executor = concurrent.futures.ThreadPoolExecutor()
 futures_list = []
@@ -73,15 +75,25 @@ def process_chunk(file, audio_file_path):
 
 def record_audio():
     global recording, chunk_index, recorded_audio, futures_list
-    recorded_audio = np.array([], dtype=np.int16)
+
+    recorded_audio = []
     chunk_index = 1
 
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=FORMAT,
+                        channels=CHANNELS,
+                        rate=SAMPLE_RATE,
+                        input=True,
+                        frames_per_buffer=CHUNK_SIZE)
+
     while recording:
-        chunk = sd.rec(int(CHUNK_DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=CHANNELS, dtype=np.int16)
-        sd.wait()
-        recorded_audio = np.concatenate((recorded_audio, chunk.flatten()))
+        print(f"Recording chunk {chunk_index}...")
+        chunk = stream.read(CHUNK_SIZE)
+        recorded_audio.append(chunk)
+        all_data = b''.join(recorded_audio)
+
         filename = f"chunk_{chunk_index}.wav"
-        save_wav(filename, recorded_audio)
+        save_wav(filename, np.frombuffer(all_data, dtype=np.int16))
         print(f"Saved: {filename}")
 
         if chunk_index % 3 == 0:
@@ -89,6 +101,10 @@ def record_audio():
             futures_list.append(future)
 
         chunk_index += 1
+
+    stream.stop_stream()
+    stream.close()
+    audio.terminate()
 
 @app.route('/')
 def index():
@@ -112,17 +128,14 @@ def stop_recording():
 
     if not os.path.exists(filename):
         print(f"Saving final chunk: {filename}")
-        chunk_samples = CHUNK_DURATION * SAMPLE_RATE
-        chunk = recorded_audio[-chunk_samples:]
-        save_wav(filename, chunk)
+        chunk_data = b''.join(recorded_audio[-1:])
+        save_wav(filename, np.frombuffer(chunk_data, dtype=np.int16))
 
-    # Cancel any futures that haven't started
     for future in futures_list:
         if not future.done():
             future.cancel()
     futures_list = []
 
-    # Submit final chunk for diarization if it's not already processed
     if last_chunk % 3 != 0:
         print(f"Submitting final chunk {filename} for diarization (not multiple of 3).")
         threading.Thread(target=process_chunk, args=(filename, filename)).start()
